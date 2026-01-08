@@ -12,6 +12,7 @@
     ElRadioGroup,
     ElMessage
   } from 'element-plus';
+  import { getRecordsByIdsBatch, getTextFromFieldData, getSelectedTableData, queryTableFields,getThisTableData } from '@/utils/formUtils';
 
   export default {
     components: {
@@ -32,55 +33,17 @@
         count:100,
         table2: '',
         fields : [],
-        targetFields: ''
+        targetFields: '',
+        deduplication: false,
+        quchong1: '',
+        quchong2: ''
       };
       const formData = ref({ ...formDataOrigin }); // 添加dataOption，默认为all（全部数据）
       const tableMetaList = ref([]);
       const table1Fields = ref([]);
       const table2Fields = ref([]);
+      const loading = ref(false); // 添加加载状态
 
-      const getDataCount = ref(5000);
-
-      // 获取当前表格数据
-      const getThisTableData = async (tableId,countLimit = null) => {
-        const table = await bitable.base.getTableById(tableId);
-        await bitable.ui.switchToTable(tableId);
-        const viewMetaList = await table.getViewMetaList();
-        
-        
-        const view = await table.getViewById(viewMetaList[0].id);
-        const recordList = await view.getVisibleRecordIdList();
-        if(countLimit){
-          return recordList.slice(0, countLimit);
-        }
-        else{
-          return recordList;
-        }
-      };
-      // 获取当前表格选中的数据
-      const getSelectedTableData = async (tableId) => {
-       const table = await bitable.base.getTableById(tableId);
-        const viewMetaList = await table.getViewMetaList();
-
-        const view = await table.getViewById(viewMetaList[0].id);
-        const selectIds = await view.getSelectedRecordIdList()
-        return selectIds;
-      };
-      // 查询表格字段名
-      async function queryTableFields(table) {      
-        
-
-        // 获取所有字段的元信息
-        const fieldMetaList = await table.getFieldMetaList();
-
-        const fields = {};
-        for (const fieldMeta of fieldMetaList) {
-          fields[fieldMeta.id] = fieldMeta.name;
-        }
-        // const arr = Object.values(fields);
-        
-        return fields
-      }
       // 切换数据表
       async function changeTable2(tableId) { 
         const table = await bitable.base.getTableById(tableId);
@@ -92,51 +55,14 @@
         });
       }
 
-      /**
-       * 分批并发获取记录
-       * @param recordIds 记录ID数组
-       * @param batchSize 每批处理的数量，默认为 50
-       * @returns 记录数组
-       */
-      async function getRecordsByIdsBatch(
-        recordIds, 
-        batchSize = 50
-      ) {
-        const table = await bitable.base.getActiveTable();
-        const allRecords = [];
-        
-        // 分批处理
-        for (let i = 0; i < recordIds.length; i += batchSize) {
-          const batch = recordIds.slice(i, i + batchSize);
-          
-          const records = await Promise.all(
-            batch.map(async (recordId) => {
-              try {
-                const record = await table.getRecordById(recordId);
-                return {
-                  recordId,
-                  ...record
-                };
-              } catch (error) {
-                console.error(`获取记录 ${recordId} 失败:`, error);
-                return null;
-              }
-            })
-          );
-          
-          allRecords.push(...records.filter(r => r !== null));
-          
-          // 可选：在批次之间添加延迟，避免请求过于集中
-          if (i + batchSize < recordIds.length) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-          }
-        }
-        
-        return allRecords;
-      }
+      
+
+    
 
       const addDatasRecord = async () => {
-        const {fields,table2,dataOption,targetFields} = formData.value;
+        loading.value = true; // 开始加载
+        try {
+          const {fields,table1,table2,dataOption,targetFields,deduplication,quchong1,quchong2} = formData.value;
           if(fields.length === 0){
             ElMessage.error('请先选择要获取数据的字段');
             return;
@@ -150,28 +76,36 @@
             return;
           }
 
+          if(deduplication){
+            if(!quchong1 || !quchong2){
+              ElMessage.error('你开启了去重，请选择去重和目标列');
+              return;
+            }
+          }
+
           localStorage.setItem('formData', JSON.stringify(formData.value));
           
           // console.log(fields,dataOption);
           let recordsIds = [];
           // 1. 获取表格A的数据id集合
           if(dataOption === 'all'){
-            recordsIds = await getThisTableData(formData.value.table1);
+            recordsIds = await getThisTableData(table1);
           }
           else if(dataOption === 'counts'){
-            recordsIds = await getThisTableData(formData.value.table1, formData.value.count);
+            recordsIds = await getThisTableData(table1, formData.value.count);
           }
           else{
-            recordsIds = await getSelectedTableData(formData.value.table1);
+            recordsIds = await getSelectedTableData(table1);
             if(recordsIds.length === 0){
               ElMessage.error('当前未选中任何数据，请先选择要合并的数据');
               return;
             }
           }
-          const allrecords = await getRecordsByIdsBatch(recordsIds);
-          // console.log('records: ', allrecords);
+          const allrecords = await getRecordsByIdsBatch(table1,recordsIds);
+          console.log('allrecords: ', allrecords);
           // 2.获取id对应的数据
           let str = formData.value.joinStr || '：';
+          const quchongNewRecord = []
           const records = allrecords.map(record => {
             const newRecord = [];
             for (const fieldId of fields) {
@@ -179,24 +113,26 @@
               if(!fieldData){
                 continue;
               }
-              let text = ''
-              if(Array.isArray(fieldData)){
-                fieldData.forEach((x) => {
-                  text += x.text;                  
-                });
-              }
-              else if(typeof fieldData === 'object'){
-                if(typeof fieldData.text != 'undefined'){
-                  text = fieldData.text;
-                }
-                else{
-                  console.error('fieldData err: ', fieldData);
-                }
+              let text = getTextFromFieldData(fieldData);
+              
+              if(text === ''){
+                continue;
               }
               newRecord.push(text);
             }
+
+            // 如果开启了去重，则处理要去重合并的字段
+            if(deduplication){
+              let fieldData = record.fields[quchong1];
+              if(fieldData){
+                let text = getTextFromFieldData(fieldData);
+                quchongNewRecord.push(text);
+              }
+            }
+
             return newRecord.join(str);
-          });
+          })
+          .filter(x => x !== '');
           // console.log(records);
           
           
@@ -205,14 +141,25 @@
             const toTable = await bitable.base.getTableById(table2);
             const toField = await toTable.getField(targetFields);
 
-            // 准备要插入的数据
-            const dataToInsert = records.join('\n');
-
+                        
             // 创建要插入的记录数组
             const recordsToInsert = [];
+
+            // 准备要插入的数据
+            const dataToInsert = records.join('\n');
             
-            const videoCell = await toField.createCell(dataToInsert);           
-            recordsToInsert.push([videoCell]);
+            const Cell1 = await toField.createCell(dataToInsert);  
+            let pushData = [Cell1]
+            if(deduplication){
+              // 去重的插入数据处理
+              const quchongRecords = Array.from(new Set(quchongNewRecord)); // 去重
+              const QuchongToField = await toTable.getField(quchong2);
+
+              const dataToInsert2 = quchongRecords.join('\n');
+              const Cell2 = await QuchongToField.createCell(dataToInsert2);
+              pushData.push(Cell2);
+            }        
+            recordsToInsert.push(pushData);
 
             // 批量插入记录
             const recordIds = await toTable.addRecords(recordsToInsert);
@@ -223,6 +170,9 @@
             // console.error('批量插入失败:', error);
             ElMessage.error('写入失败: ' + error.message);
           }
+        } finally {
+          loading.value = false; // 结束加载
+        }
       };
 
       const changeTable1 = async (tableId) => { 
@@ -271,7 +221,8 @@
         table1Fields,
         table2Fields,
         changeTable2,
-        changeTable1
+        changeTable1,
+        loading // 将loading状态暴露给模板
       };
     },
   };
@@ -286,7 +237,7 @@
     </div>
 
     <el-card class="form-card" shadow="never">
-      <el-form-item label="1.选择原始“数据表”（A）" size="large">
+      <el-form-item label="1.选择原始“数据表”（A）" size="default">
         <el-select v-model="formData.table1" placeholder="请选择数据表A" style="width: 100%" @change="changeTable1">
           <el-option
             v-for="meta in tableMetaList"
@@ -296,7 +247,7 @@
           />
         </el-select>       
       </el-form-item>
-      <el-form-item label="2.选择要获取数据的“字段”（列）" size="large">
+      <el-form-item label="2.选择要获取数据的“字段”（列）" size="default">
         <!-- 这里是个多选项 -->
         <el-select v-model="formData.fields" multiple placeholder="请选择字段" style="width: 100%">
           <el-option
@@ -310,11 +261,11 @@
       <el-form-item label="请输入字段间连接符，例如 ：，" size="small"  class="horizontal-item">
         <el-input v-model="formData.joinStr" placeholder="：" style="width: 80px;" ></el-input>
       </el-form-item>
-      <el-form-item label="3.选择要合并的数据范围" size="large" style="margin-bottom: 0;">
+      <el-form-item label="3.选择要合并的数据范围" size="default" style="margin-bottom: 0;">
         <!-- 选条数 -->
         <el-radio-group v-model="formData.dataOption">
           <el-radio value="all">全部数据</el-radio>
-          <el-radio value="counts">前几条数据</el-radio>
+          <el-radio value="counts">前几条</el-radio>
           <el-radio value="selected">选中数据</el-radio>
         </el-radio-group>
         
@@ -331,7 +282,7 @@
     </el-card>
     
     <el-card class="form-card" shadow="never">
-      <el-form-item label="4.选择要合并到的“数据表”（B）" size="large">
+      <el-form-item label="4.选择要合并到的“数据表”（B）" size="default">
         <el-select v-model="formData.table2" placeholder="请选择数据表B" style="width: 100%" @change="changeTable2">
           <el-option
             v-for="meta in tableMetaList"
@@ -341,19 +292,42 @@
           />
         </el-select>       
       </el-form-item>
-      <el-form-item label="5.选择要合并到的“字段”（列）" size="large">
+      <el-form-item label="5.选择要合并到的“字段”（列）" size="default">
         <el-select v-model="formData.targetFields" placeholder="请选择目标字段" style="width: 100%">
           <el-option
-            v-for="field in table2Fields"
-            :key="field"
+            v-for="(field, index) in table2Fields"
+            :key="index"
             :label="field"
-            :value="field"
+            :value="index"
           />
         </el-select>
       </el-form-item>
+      <el-form-item label="6.是否要某列“去重合并”" size="default">
+        <el-switch v-model="formData.deduplication" active-text="去重" inactive-text="不去重"></el-switch>
+        <div v-if="formData.deduplication" style="width: 100%;display: flex;">
+          <el-select v-model="formData.quchong1" placeholder="去重列" style="width: 100%">
+            <el-option
+            v-for="(field, index) in table1Fields"
+            :key="index"
+            :label="field"
+            :value="index"
+          />
+          </el-select>
+          <div style="margin: 0px 3px;">=></div> 
+          <el-select v-model="formData.quchong2" placeholder="目标列" style="width: 100%">
+            <el-option
+            v-for="(field, index) in table2Fields"
+            :key="index"
+            :label="field"
+            :value="index"
+          />
+          </el-select>
+        </div>
+      </el-form-item>
     
-      <el-button type="primary" plain size="large" @click="addDatasRecord">开始合并</el-button>
-      <el-button type="info" plain size="large" @click="resetFormdata">清空重填</el-button>
+      <el-button type="primary" plain size="default" @click="addDatasRecord" :loading="loading">开始合并</el-button>
+
+      <el-button type="info" plain size="default" @click="resetFormdata">清空重填</el-button>
     </el-card>
   </el-form>
 </template>
@@ -399,3 +373,4 @@
   margin-left: 0 !important;
 }
 </style>
+
