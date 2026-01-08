@@ -152,7 +152,7 @@
 
           localStorage.setItem('formData', JSON.stringify(formData.value));
           
-          console.log(fields,dataOption);
+          // console.log(fields,dataOption);
           let recordsIds = [];
           // 1. 获取表格A的数据id集合
           if(dataOption === 'all'){
@@ -176,6 +176,9 @@
             const newRecord = [];
             for (const fieldId of fields) {
               let fieldData = record.fields[fieldId];
+              if(!fieldData){
+                continue;
+              }
               let text = ''
               if(Array.isArray(fieldData)){
                 fieldData.forEach((x) => {
@@ -183,7 +186,7 @@
                 });
               }
               else if(typeof fieldData === 'object'){
-                if(fieldData.text){
+                if(typeof fieldData.text != 'undefined'){
                   text = fieldData.text;
                 }
                 else{
@@ -278,6 +281,8 @@
   <el-form ref="form" class="form" :model="formData" label-position="top">
     <div class="merge-info">
       将表格A内 <b>选中的数据</b> 或 <b>全部数据(最多5000条)</b> 合并到 <b>目标表格B</b>
+      <br>
+      <el-link href="https://ai.feishu.cn/wiki/B7LTwox5bisZnvkEyIxcoM3Sncc" target="_blank">📝如有问题和新需求，点此处反馈</el-link>
     </div>
 
     <el-card class="form-card" shadow="never">
@@ -286,7 +291,7 @@
           <el-option
             v-for="meta in tableMetaList"
             :key="meta.id"
-            :label="meta.name"
+            :label="'📊'+meta.name"
             :value="meta.id"
           />
         </el-select>       
@@ -309,8 +314,8 @@
         <!-- 选条数 -->
         <el-radio-group v-model="formData.dataOption">
           <el-radio value="all">全部数据</el-radio>
-          <el-radio value="selected">选中数据</el-radio>
           <el-radio value="counts">前几条数据</el-radio>
+          <el-radio value="selected">选中数据</el-radio>
         </el-radio-group>
         
         <!-- 当选择"前几条数据"时显示数量输入框 -->
@@ -331,7 +336,7 @@
           <el-option
             v-for="meta in tableMetaList"
             :key="meta.id"
-            :label="meta.name"
+            :label="'📊'+meta.name"
             :value="meta.id"
           />
         </el-select>       
