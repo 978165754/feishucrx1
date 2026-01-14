@@ -1,6 +1,6 @@
 {
   "name": "合并多列数据到其他表",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "output": "dist",
   "scripts": {
     "dev": "vite",
