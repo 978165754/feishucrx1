@@ -195,7 +195,20 @@
         const [tableList, selection] = await Promise.all([bitable.base.getTableMetaList(), bitable.base.getSelection()]);
           const savedFormData = localStorage.getItem('formData');
           if (savedFormData) {
-            formData.value = JSON.parse(savedFormData);
+            const savedFormDataObj = JSON.parse(savedFormData);
+            const IDS = tableList.map(t => t.id);
+            if(IDS.includes(savedFormDataObj.table1) === false || IDS.includes(savedFormDataObj.table2) === false){
+
+              if(IDS.includes(savedFormDataObj.table1) === false){
+                formData.value.table1 = selection.tableId;
+              }
+              if(IDS.includes(savedFormDataObj.table2) === false){
+                formData.value.table2 = tableList[0].id;
+              }
+            }
+            else{
+              formData.value = savedFormDataObj;
+            }
             changeTable2(formData.value.table2);
           }
           else{
